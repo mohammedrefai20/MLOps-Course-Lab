@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from sklearn.utils import resample
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC
 from sklearn.compose import make_column_transformer
 from sklearn.preprocessing import OneHotEncoder,  StandardScaler
 from sklearn.metrics import (
@@ -20,6 +22,9 @@ from sklearn.metrics import (
 )
 
 ### Import MLflow
+import mlflow
+import mlflow.sklearn
+from mlflow.models.signature import infer_signature
 
 def rebalance(data):
     """
@@ -107,7 +112,10 @@ def preprocess(df):
     X_test = pd.DataFrame(X_test, columns=col_transf.get_feature_names_out())
 
     # Log the transformer as an artifact
-
+    mlflow.sklearn.log_model(
+            sk_model=col_transf,
+            artifact_path="preprocessor"
+        )
     return col_transf, X_train, X_test, y_train, y_test
 
 
@@ -122,41 +130,71 @@ def train(X_train, y_train):
     Returns:
         LogisticRegression: trained logistic regression model
     """
-    log_reg = LogisticRegression(max_iter=1000)
-    log_reg.fit(X_train, y_train)
+    # log_reg = LogisticRegression(max_iter=1000)
+    # svm = SVC(C=1.0,kernel='rbf',gamma=10)
+    dt=DecisionTreeClassifier(criterion='gini',max_depth=5)
+    # svm.fit(X_train, y_train)
+    dt.fit(X_train, y_train)
+    # log_reg.fit(X_train, y_train)
 
     ### Log the model with the input and output schema
     # Infer signature (input and output schema)
-
+    signature = infer_signature(X_train, dt.predict(X_train))
     # Log model
-
+    # with mlflow.start_run(run_name="logreg_training"):
+    mlflow.sklearn.log_model(
+        sk_model=dt,
+        name="model",
+        signature=signature,
+        input_example=X_train.head(2)
+    )
     ### Log the data
-
-    return log_reg
+    X_train.to_csv("X_train.csv", index=False)
+    y_train.to_csv("y_train.csv", index=False)
+    mlflow.log_artifact("X_train.csv")
+    mlflow.log_artifact("y_train.csv")
+    return dt
 
 
 def main():
     ### Set the tracking URI for MLflow
-
+    mlflow.set_tracking_uri("http://127.0.0.1:5000/")
     ### Set the experiment name
-
+    mlflow.set_experiment("Churn_Experiment")
 
     ### Start a new run and leave all the main function code as part of the experiment
-
-    df = pd.read_csv("data/Churn_Modelling.csv")
-    col_transf, X_train, X_test, y_train, y_test = preprocess(df)
+    with mlflow.start_run(run_name="Churn_DT_Run"):
+        df = pd.read_csv("G:\ITI_AI\Lectures\MLflow\Assignments\Project\MLOps-Course-Lab\dataset/Churn_Modelling.csv")
+        col_transf, X_train, X_test, y_train, y_test = preprocess(df)
 
     ### Log the max_iter parameter
+    #     svm = svm.SVC(C=1.0,kernel='rbf',gamma=10)
+    # dt=DecisionTreeClassifier(criterion='gini',max_depth=5)
 
-    model = train(X_train, y_train)
+        # mlflow.log_param("max_iter",1000)
+        mlflow.log_params({"criterion":"gini",
+                           "max_depth":5,
+                           })
+        
 
-    
-    y_pred = model.predict(X_test)
+        model = train(X_train, y_train)
+        y_pred = model.predict(X_test)
 
     ### Log metrics after calculating them
-
+        acc = accuracy_score(y_test, y_pred)
+        prec = precision_score(y_test, y_pred)
+        rec = recall_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred)
+        mlflow.log_metrics({
+            "accuracy": acc,
+            "precision": prec,
+            "recall": rec,
+            "f1_score": f1
+        })
 
     ### Log tag
+    mlflow.set_tag("model_type", "Decision Tree")
+
 
 
     
@@ -167,7 +205,9 @@ def main():
     conf_mat_disp.plot()
     
     # Log the image as an artifact in MLflow
-    
+    fig_path = "confusion_matrix.png"
+    plt.savefig(fig_path)
+    mlflow.log_artifact(fig_path)
     plt.show()
 
 
